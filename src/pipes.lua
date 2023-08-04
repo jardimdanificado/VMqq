@@ -25,7 +25,7 @@ end
 
 pipes.drawtxt = function(session)
     for i, text in ipairs(session.scene.text) do
-        rl.DrawText(text.file, text.position.x, text.position.y, text.size or 20, text.color or session.scene.color.text)
+        rl.DrawText(text.file, text.position.x, text.position.y, text.size or session.defaults.text.size, text.color or session.scene.color.text)
     end
 end
 
@@ -35,9 +35,13 @@ pipes.drawcube = function(session)
             rl.DrawCubeV(cube.position, cube.size, cube.color or rl.RED)
         end
         if cube.wired then
-            rl.DrawCubeWiresV(cube.position, cube.size, session.scene.color.wires)
+            rl.DrawCubeWiresV(cube.position, cube.size, session.defaults.color)
         end
     end
+end
+
+pipes.fpscounter = function(session)
+    rl.DrawFPS(1,1)
 end
 
 pipes.enddraw = function()

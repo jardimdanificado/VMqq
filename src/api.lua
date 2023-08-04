@@ -100,10 +100,17 @@ api.run = function(session, command)
     for i, cmd in ipairs(api.formatcmd(command)) do
         local split = api.string.split(cmd, " ")
         local args = {}
+        if not session.cmd[split[1]] and #split >= 3 then
+            table.insert(split,1,'set')
+        end
         for i = 2, #split, 1 do
             table.insert(args,split[i])
         end
-        result = (session.cmd[split[1]] or session.cmd['--'])(session,args,cmd) or cmd
+        if session.cmd[split[1]] then
+            result = (session.cmd[split[1]])(session,args,cmd) or cmd
+        else
+            print('unknown command: ' .. (split[1] or 'null'))
+        end
     end
     return result
 end
@@ -129,13 +136,24 @@ api.new =
                 type = rl.CAMERA_PERSPECTIVE
             }),
         }
-        table.insert(session.scenes,scene)
+        if session then
+            table.insert(session.scenes,scene)
+        end
         return scene
     end,
     text = function(session,text,px,py,color,size)
-        local text = {file=text,position={x=px or 0,y=py or 0},color = color or rl.BLACK, size or 20}
-        table.insert(session.scene.text,text)
+        local text = {file=text,position={x=px or 0,y=py or 0},color = color or rl.BLACK, size = size or session.defaults.text.size}
+        if session then
+            table.insert(session.scene.text,text)
+        end
         return text
+    end,
+    cube = function(session,px,py,pz,sx,sy,sz,color,wired)
+        local cube = {wired = wired or true,position={x=px or 0,y=py or 0,z=pz or 0},size={x=sx or 1,y=sy or 1,z=sz or 1},color = color or rl.BLACK}
+        if session then
+            table.insert(session.scene.cube,cube)
+        end
+        return cube
     end
 }
 
@@ -146,65 +164,7 @@ api.set =
     end
 }
 
-api.consolemode = function(session)
-    local quit = false
-    session.cmd.back = function()
-        quit = true
-    end
-    session.cmd.exit = function()
-        session.temp.quit = true
-        quit = true
-    end
-    session.scene._text = session.scene.text
-    session.scene.text = session.scene.consoletext or {}
-    local txtsize = 20
-    local lastline = (session.window.height - txtsize)
-    local juststarted = true
-    local text = api.new.text(session,'',txtsize/1.8 , lastline)
-    local logs = {api.new.text(session,'console mode activated.',0,(session.window.height - (txtsize)*2))}
-    local barra = api.new.text(session,">", txtsize/7, lastline)
-    while not quit do
-        if rl.IsKeyPressed(rl.KEY_ENTER) then
-            session:run(text.file)
-            for k, txt in ipairs(logs) do
-                
-                if txt.position.y - txtsize <= 0 then
-                    txt.file = ''
-                else
-                    
-                    txt.position.y = txt.position.y - txtsize
-                    
-                end
-
-            end
-            table.insert(logs,api.new.text(session,'', 0, text.position.y - txtsize))
-            logs[#logs].file = text.file
-            text.file = ''
-            
-        elseif rl.IsKeyPressed(rl.KEY_BACKSPACE) then 
-            text.file = string.sub(text.file,1,#text.file-1)
-        elseif rl.IsKeyPressed(rl.KEY_F1) then 
-            if not juststarted then
-                quit = true
-            else
-                juststarted = false
-            end
-            
-        elseif rl.GetKeyPressed() > 0 and not rl.IsKeyPressed(rl.KEY_F1) then
-            text.file = text.file .. string.char(rl.GetCharPressed())
-        end
-        session.api.process(session,'',session.pipeline.render)
-    end
-    for k, v in pairs(session.scene.text) do
-        if v.file == '>' then
-            session.scene.text[k] = nil
-        end
-    end
-    session.scene.text = session.scene._text
-    session.scene._text = nil
-end
-
-api.startup = function(session)
+api.startup = function()
     for i, v in ipairs(arg or {}) do
         if api.string.includes(v,'-gl') then
             api.gl = api.string.replace(v,'-gl','')
@@ -217,7 +177,7 @@ api.startup = function(session)
     end
 end
 
-api.version = '0.0.1'
+api.version = '0.0.2'
 
 api.gl = '21'
 
@@ -240,7 +200,8 @@ api.new.session = function(width,height,title,flags)
         FLAG_MSAA_4X_HINT, 
         FLAG_INTERLACED_HINT
     ]]
-    flags = flags or {}
+    flags = flags or {'FLAG_WINDOW_RESIZABLE'}
+    
     local session =
     {
         pipes = require 'src.pipes',
@@ -252,16 +213,12 @@ api.new.session = function(width,height,title,flags)
         process = api.process,
         run = api.run,
         api = api,
-        console = 
-        {
-            logs = {},
-            active = false
-        },
+        console = require 'src.console',
         window = 
         {
             width = 320,
             height = 240,
-            title = ('maqquina' .. api.version)
+            title = ('mqqVM' .. api.version)
         },
         scenes = {},
         scene = {},
@@ -269,9 +226,56 @@ api.new.session = function(width,height,title,flags)
         temp = {},
         cmd = 
         {
-            ['--'] = function() end
+            ['--'] = function() end,
+            set = function(session,args)
+                local found = false
+                local function recurse(arr,subname)
+                    return tonumber(arr[subname]) or arr[subname]
+                end
+                local camp = session.scene[args[1]][tonumber(args[2]) or args[2]]
+                for i = 3, #args-2, 1 do
+                    camp = recurse(camp,args[i])
+                end
+                local result = args[#args]
+                if tonumber(args[#args]) then
+                    result = tonumber(args[#args])
+                elseif args[#args] == 'true' or args[#args] == 'false' then
+                    result = args[#args] == 'true' and true or false
+                end
+
+                if result == 'nil' then
+                    camp[args[#args-1]] = nil
+                else
+                    camp[args[#args-1]] = result
+                end
+            end
+        },
+        defaults = 
+        {
+            text = 
+            {
+                size = 10,
+                color = rl.BLACK,
+                position = {x=0,y=0}
+            },
+            backgroundcolor = rl.LIGHTGRAY,
+            color = rl.RED
         }
     }
+
+    session.console.key[320] = "KEY_ZERO"
+    session.console.key[321] = "KEY_ONE"
+    session.console.key[322] = "KEY_TWO"
+    session.console.key[323] = "KEY_THREE"
+    session.console.key[324] = "KEY_FOUR"
+    session.console.key[325] = "KEY_FIVE"
+    session.console.key[326] = "KEY_SIX"
+    session.console.key[327] = "KEY_SEVEN"
+    session.console.key[328] = "KEY_EIGHT"
+    session.console.key[329] = "KEY_NINE"
+    session.console.key[335] = "KEY_KP_ENTER"
+    session.console.key[336] = "KEY_KP_EQUAL"
+
 
     session:pipeadd('close','_close')
     session:pipeadd('startdraw','_startdraw')
@@ -280,22 +284,27 @@ api.new.session = function(width,height,title,flags)
     session:pipeadd('drawcube','_drawcube')
     session:pipeadd('end3d','_end3d')
     session:pipeadd('drawtxt','_drawtxt')
+    session:pipeadd('fpscounter','_fpscounter')
     session:pipeadd('enddraw','_enddraw')
 
     session.pipeline.render = session.pipeline.main
     session.pipeline.main = {}
     
-    api.startup(session)
+    
     session.scene = api.new.scene(session,'3d')
     for i, v in ipairs(flags) do
-        rl.SetFlag(v)
+        rl.SetConfigFlags(rl[v])
     end
-
+    
     session.window.width = width or session.window.width
     session.window.height = height or session.window.height
     session.window.title = title or session.window.title
+    api.new.text(session,'press f1 to open console',0,session.window.height - session.defaults.text.size,rl.BLACK,session.defaults.text.size)
     rl.InitWindow(session.window.width, session.window.height, session.window.title)
+    api.new.cube(session,1,1,1,4,2,1,rl.GREEN,true)
     return session
 end
+
+api.startup()
 
 return api

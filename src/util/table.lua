@@ -58,4 +58,34 @@ _table.merge = function(arr1,arr2)
     end
 end
 
+_table.move = function(tbl, fromIndex, toIndex)
+    if type(tbl) ~= "table" then
+        error("The provided argument is not a table.")
+    end
+
+    if fromIndex == toIndex or fromIndex < 1 or toIndex < 1 or fromIndex > #tbl + 1 or toIndex > #tbl + 1 then
+        -- No need to move if the indices are the same or out of range.
+        return
+    end
+
+    local valueToMove = table.remove(tbl, fromIndex)
+    table.insert(tbl, toIndex, valueToMove)
+end
+
+_table.find = function(tbl, value)
+    if type(tbl) ~= "table" then
+        error("The provided argument is not a table.")
+    end
+
+    for i, v in ipairs(tbl) do
+        if v == value then
+            return i
+        end
+    end
+
+    return nil  -- Return nil if the element is not found
+end
+
+
+
 return _table
